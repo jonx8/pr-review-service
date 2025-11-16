@@ -1,16 +1,30 @@
 services:
-  postgres:
+  pr-review-postgres:
     image: postgres:15-alpine
     container_name: pr-review-postgres
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=pr_review
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+
+  pr-review-service:
+    build: .
+    container_name: pr-review-service
+    environment:
+      DB_HOST: pr-review-postgres
+      DB_USER: postgres
+      DB_PASSWORD: password
+      DB_NAME: pr_review
+      DB_PORT: 5432
+      ENVIRONMENT: production
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - pr-review-postgres
 
 volumes:
   postgres_data:
