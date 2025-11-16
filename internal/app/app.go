@@ -2,11 +2,15 @@ package app
 
 import (
 	"log"
+	"log/slog"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jonx8/pr-review-service/internal/config"
 	"github.com/jonx8/pr-review-service/internal/database"
 	"github.com/jonx8/pr-review-service/internal/handlers"
+	"github.com/jonx8/pr-review-service/internal/repositories"
+	"github.com/jonx8/pr-review-service/internal/services"
 )
 
 func RunApplication() {
@@ -14,23 +18,73 @@ func RunApplication() {
 
 	db, err := database.InitDB(*cfg.DBConfig)
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		slog.Error("Failed to connect to database:", "error", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
-	log.Println("Database connected successfully")
+	if err := database.RunMigrations(db); err != nil {
+		slog.Error("Failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("Database connected successfully")
 
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	r := gin.Default()
-	r.GET("/health", handlers.HealthCheck)
+	teamRepo := repositories.NewTeamRepository(db)
+	userRepo := repositories.NewUserRepository(db)
+	prRepo := repositories.NewPRRepository(db)
+
+	teamService := services.NewTeamService(teamRepo)
+	userService := services.NewUserService(userRepo)
+	prService := services.NewPRService(prRepo, userService, teamService)
+
+	router := SetupRouter(teamService, userService, prService)
 
 	log.Printf("Server starting on %s", cfg.ServerAddress)
 	log.Printf("Environment: %s", cfg.Environment)
 
-	if err := r.Run(cfg.ServerAddress); err != nil {
-		log.Fatal("Failed to start server:", err)
+	if err := router.Run(cfg.ServerAddress); err != nil {
+		slog.Error("Failed to start server", "error", err)
+		os.Exit(1)
 	}
+}
+
+func SetupRouter(teamService services.TeamService, userService services.UserService, prService services.PRService) *gin.Engine {
+	router := gin.Default()
+
+	healthHandler := handlers.NewHealthHandler()
+	teamHandler := handlers.NewTeamHandler(teamService)
+	userHandler := handlers.NewUserHandler(userService, prService)
+	prHandler := handlers.NewPRHandler(prService)
+
+	// Health routes
+	router.GET("/health", healthHandler.HealthCheck)
+
+	// Team routes
+	teamRoutes := router.Group("/team")
+	{
+		teamRoutes.POST("/add", teamHandler.CreateTeam)
+		teamRoutes.GET("/get", teamHandler.GetTeam)
+	}
+
+	// User routes
+	userRoutes := router.Group("/users")
+	{
+		userRoutes.POST("/setIsActive", userHandler.SetUserActive)
+		userRoutes.GET("/getReview", userHandler.GetUserReviewPRs)
+	}
+
+	// PR routes
+	prRoutes := router.Group("/pullRequest")
+	{
+		prRoutes.POST("/create", prHandler.CreatePR)
+		prRoutes.POST("/merge", prHandler.MergePR)
+		prRoutes.POST("/reassign", prHandler.ReassignReviewer)
+	}
+
+	return router
 }
