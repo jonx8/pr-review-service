@@ -13,9 +13,11 @@
 ## 🛠 Стек технологий
 - Go 1.25.3
 - PostgreSQL 15
-- Gin
-- SQLx
-- go-migrate
+- [Gin](https://github.com/gin-gonic/gin)
+- [avito-tech/go-transaction-manager](https://github.com/avito-tech/go-transaction-manager)
+- [SQLx](https://github.com/jmoiron/sqlx)
+- [golang-migrate](https://github.com/golang-migrate/migrate)
+- [golanci-lint](https://github.com/golangci/golangci-lint)
 - Docker & Docker Compose
 
 ## 🚀 Быстрый старт
@@ -115,10 +117,11 @@ make build
 │   ├── models/                     # Структуры данных
 │   ├── errors/                     # Кастомные ошибки
 │   └── utils/                      # Вспомогательные утилиты
-├── migrations/                     # SQL миграции (go-migrate)
+├── migrations/                     # SQL миграции (golang-migrate)
 ├── docker-compose.yml              # Конфигурация Docker Compose
 ├── Dockerfile                      # Конфигурация Docker
 ├── Makefile                        # Автоматизация задач
+├── .golangci-cli.yaml              # Конфигурация линтера Golangci-lint  
 ├── .env.example                    # Шаблон переменных окружения
 └── go.mod                          # Зависимости Go
 ```
