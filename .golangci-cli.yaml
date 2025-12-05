@@ -1,0 +1,90 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - goimports
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    
+    - gocritic
+    - bodyclose
+    - contextcheck
+    - dupl
+    - goconst
+    - gocyclo
+    - godot
+    - godox
+    - gofmt
+    - gofumpt
+    - misspell
+    - nestif
+    - nilerr
+    - noctx
+    - prealloc
+    - predeclared
+    - revive
+    - stylecheck
+    - unconvert
+    - whitespace
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+  govet:
+    check-shadowing: true
+  misspell:
+    locale: US
+  
+  gofumpt:
+    extra-rules: true
+  godot:
+    scope: declarations
+    capital: true
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - gocyclo
+        - funlen
+    
+    - linters:
+        - staticcheck
+      text: "SA1019:"
+    
+    - text: "empty block"
+      linters:
+        - revive
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+skip-dirs:
+  - vendor
+  - third_party
+  - testdata
+  - generated
+  - .git
+
+severity:
+  default-severity: error
