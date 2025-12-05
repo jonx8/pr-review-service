@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
@@ -219,7 +220,7 @@ func (s *prService) ReassignReviewer(ctx context.Context, prID string, oldUserID
 			return err
 		}
 
-		if !u.Contains(pr.AssignedReviewers, oldUserID) {
+		if !slices.Contains(pr.AssignedReviewers, oldUserID) {
 			slog.Error("reviewer is not assigned to this PR",
 				"method", method,
 				"pr_id", prID,
@@ -269,7 +270,7 @@ func (s *prService) findReplacementReviewer(team *m.Team, authorID string, curre
 		if member.UserID != authorID &&
 			member.IsActive &&
 			member.UserID != oldUserID &&
-			!u.Contains(currentReviewers, member.UserID) {
+			!slices.Contains(currentReviewers, member.UserID) {
 			candidates = append(candidates, member.UserID)
 		}
 	}
