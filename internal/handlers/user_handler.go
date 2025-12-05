@@ -27,7 +27,7 @@ func (h *UserHandler) SetUserActive(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userService.SetIsActive(req)
+	user, err := h.userService.SetIsActive(c.Request.Context(), req)
 	if err != nil {
 		handleError(c, err)
 		return
@@ -43,7 +43,7 @@ func (h *UserHandler) GetUserReviewPRs(c *gin.Context) {
 		return
 	}
 
-	prs, err := h.prService.GetPRByReviewer(userID)
+	prs, err := h.prService.GetPRByReviewer(c.Request.Context(), userID)
 	if err != nil {
 		handleError(c, err)
 		return

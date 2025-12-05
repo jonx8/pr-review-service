@@ -1,39 +1,46 @@
 package repositories
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"time"
 
+	trmsqlx "github.com/avito-tech/go-transaction-manager/drivers/sqlx/v2"
 	"github.com/jmoiron/sqlx"
 	m "github.com/jonx8/pr-review-service/internal/models"
 )
 
 type PRRepository interface {
-	ExistsByID(prID string) (bool, error)
-	GetByID(prID string) (*m.PullRequest, error)
-	Create(pr *m.PullRequest) error
-	UpdateStatus(prID string, status string, mergedAt *time.Time) error
-	UpdateReviewer(prID string, oldUserID string, newUserID string) error
-	GetByReviewer(userID string) ([]m.PullRequestShort, error)
+	ExistsByID(ctx context.Context, prID string) (bool, error)
+	GetByID(ctx context.Context, prID string) (*m.PullRequest, error)
+	Create(ctx context.Context, pr *m.PullRequest) error
+	UpdateStatus(ctx context.Context, prID string, status string, mergedAt *time.Time) error
+	UpdateReviewer(ctx context.Context, prID string, oldUserID string, newUserID string) error
+	GetByReviewer(ctx context.Context, userID string) ([]m.PullRequestShort, error)
 }
 
 type prRepository struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	getter *trmsqlx.CtxGetter
 }
 
 func NewPRRepository(db *sqlx.DB) PRRepository {
-	return &prRepository{db: db}
+	return &prRepository{
+		db:     db,
+		getter: trmsqlx.DefaultCtxGetter,
+	}
 }
 
-func (r *prRepository) ExistsByID(prID string) (bool, error) {
+func (r *prRepository) ExistsByID(ctx context.Context, prID string) (bool, error) {
 	query := `SELECT EXISTS(SELECT 1 FROM pull_requests WHERE id = $1)`
 	var exists bool
-	err := r.db.Get(&exists, query, prID)
+
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &exists, query, prID)
 	return exists, err
 }
 
-func (r *prRepository) GetByID(prID string) (*m.PullRequest, error) {
+func (r *prRepository) GetByID(ctx context.Context, prID string) (*m.PullRequest, error) {
 	const method = "PRRepository.GetByID"
 
 	query := `
@@ -48,7 +55,8 @@ func (r *prRepository) GetByID(prID string) (*m.PullRequest, error) {
         WHERE id = $1
     `
 	var pr m.PullRequest
-	err := r.db.Get(&pr, query, prID)
+
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &pr, query, prID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			slog.Error("PR not found",
@@ -72,7 +80,8 @@ func (r *prRepository) GetByID(prID string) (*m.PullRequest, error) {
         ORDER BY assigned_at
     `
 	var reviewers []string
-	err = r.db.Select(&reviewers, reviewersQuery, prID)
+
+	err = r.getter.DefaultTrOrDB(ctx, r.db).SelectContext(ctx, &reviewers, reviewersQuery, prID)
 	if err != nil {
 		slog.Error("failed to get PR reviewers",
 			"method", method,
@@ -89,18 +98,15 @@ func (r *prRepository) GetByID(prID string) (*m.PullRequest, error) {
 
 	return &pr, nil
 }
-func (r *prRepository) Create(pr *m.PullRequest) error {
-	tx, err := r.db.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+
+func (r *prRepository) Create(ctx context.Context, pr *m.PullRequest) error {
+	db := r.getter.DefaultTrOrDB(ctx, r.db)
 
 	query := `
         INSERT INTO pull_requests (id, title, author_id, status, created_at)
         VALUES ($1, $2, $3, $4, $5)
     `
-	_, err = tx.Exec(query,
+	_, err := db.ExecContext(ctx, query,
 		pr.PullRequestID,
 		pr.PullRequestName,
 		pr.AuthorID,
@@ -113,38 +119,38 @@ func (r *prRepository) Create(pr *m.PullRequest) error {
 
 	if len(pr.AssignedReviewers) > 0 {
 		reviewerQuery := `
-            INSERT INTO pr_reviewers (pr_id, user_id)
-            VALUES ($1, $2)
+            INSERT INTO pr_reviewers (pr_id, user_id, assigned_at)
+            VALUES ($1, $2, $3)
         `
+		assignedAt := time.Now()
+
 		for _, reviewerID := range pr.AssignedReviewers {
-			_, err = tx.Exec(reviewerQuery, pr.PullRequestID, reviewerID)
+			_, err = db.ExecContext(ctx, reviewerQuery,
+				pr.PullRequestID, reviewerID, assignedAt)
 			if err != nil {
 				return err
 			}
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (r *prRepository) UpdateStatus(prID string, status string, mergedAt *time.Time) error {
+func (r *prRepository) UpdateStatus(ctx context.Context, prID string, status string, mergedAt *time.Time) error {
 	query := `
         UPDATE pull_requests 
         SET status = $1, merged_at = $2
         WHERE id = $3
     `
-	_, err := r.db.Exec(query, status, mergedAt, prID)
+
+	_, err := r.getter.DefaultTrOrDB(ctx, r.db).ExecContext(ctx, query, status, mergedAt, prID)
 	return err
 }
 
-func (r *prRepository) UpdateReviewer(prID string, oldUserID string, newUserID string) error {
-	tx, err := r.db.Beginx()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+func (r *prRepository) UpdateReviewer(ctx context.Context, prID string, oldUserID string, newUserID string) error {
+	db := r.getter.DefaultTrOrDB(ctx, r.db)
 
-	_, err = tx.Exec(
+	_, err := db.ExecContext(ctx,
 		"DELETE FROM pr_reviewers WHERE pr_id = $1 AND user_id = $2",
 		prID, oldUserID,
 	)
@@ -152,18 +158,18 @@ func (r *prRepository) UpdateReviewer(prID string, oldUserID string, newUserID s
 		return err
 	}
 
-	_, err = tx.Exec(
-		"INSERT INTO pr_reviewers (pr_id, user_id) VALUES ($1, $2)",
-		prID, newUserID,
+	_, err = db.ExecContext(ctx,
+		"INSERT INTO pr_reviewers (pr_id, user_id, assigned_at) VALUES ($1, $2, $3)",
+		prID, newUserID, time.Now(),
 	)
 	if err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (r *prRepository) GetByReviewer(userID string) ([]m.PullRequestShort, error) {
+func (r *prRepository) GetByReviewer(ctx context.Context, userID string) ([]m.PullRequestShort, error) {
 	query := `
         SELECT 
             pr.id,
@@ -176,7 +182,9 @@ func (r *prRepository) GetByReviewer(userID string) ([]m.PullRequestShort, error
         ORDER BY pr.created_at DESC
     `
 	var prs []m.PullRequestShort
-	if err := r.db.Select(&prs, query, userID); err != nil {
+
+	err := r.getter.DefaultTrOrDB(ctx, r.db).SelectContext(ctx, &prs, query, userID)
+	if err != nil {
 		return nil, err
 	}
 

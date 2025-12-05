@@ -3,9 +3,11 @@ package app
 import (
 	"log"
 	"log/slog"
-	"os"
 
+	trmsqlx "github.com/avito-tech/go-transaction-manager/drivers/sqlx/v2"
+	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
 	"github.com/gin-gonic/gin"
+
 	"github.com/jonx8/pr-review-service/internal/config"
 	"github.com/jonx8/pr-review-service/internal/database"
 	"github.com/jonx8/pr-review-service/internal/handlers"
@@ -13,19 +15,19 @@ import (
 	"github.com/jonx8/pr-review-service/internal/services"
 )
 
-func RunApplication() {
+func RunApplication() error {
 	cfg := config.Load()
 
 	db, err := database.InitDB(*cfg.DBConfig)
 	if err != nil {
 		slog.Error("Failed to connect to database:", "error", err)
-		os.Exit(1)
+		return err
 	}
 	defer db.Close()
 
 	if err := database.RunMigrations(db); err != nil {
 		slog.Error("Failed to run migrations", "error", err)
-		os.Exit(1)
+		return err
 	}
 
 	slog.Info("Database connected successfully")
@@ -34,13 +36,15 @@ func RunApplication() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	trManager := manager.Must(trmsqlx.NewDefaultFactory(db))
+
 	teamRepo := repositories.NewTeamRepository(db)
 	userRepo := repositories.NewUserRepository(db)
 	prRepo := repositories.NewPRRepository(db)
 
-	teamService := services.NewTeamService(teamRepo)
-	userService := services.NewUserService(userRepo)
-	prService := services.NewPRService(prRepo, userService, teamService)
+	teamService := services.NewTeamService(teamRepo, trManager)
+	userService := services.NewUserService(userRepo, trManager)
+	prService := services.NewPRService(prRepo, userService, teamService, trManager)
 
 	router := SetupRouter(teamService, userService, prService)
 
@@ -49,8 +53,10 @@ func RunApplication() {
 
 	if err := router.Run(cfg.ServerAddress); err != nil {
 		slog.Error("Failed to start server", "error", err)
-		os.Exit(1)
+		return err
 	}
+
+	return nil
 }
 
 func SetupRouter(teamService services.TeamService, userService services.UserService, prService services.PRService) *gin.Engine {

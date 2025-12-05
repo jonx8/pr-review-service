@@ -1,33 +1,40 @@
 package repositories
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 
+	trmsqlx "github.com/avito-tech/go-transaction-manager/drivers/sqlx/v2"
 	"github.com/jmoiron/sqlx"
 	m "github.com/jonx8/pr-review-service/internal/models"
 )
 
-type userRepository struct {
-	db *sqlx.DB
+type UserRepository interface {
+	ExistsByID(ctx context.Context, userID string) (bool, error)
+	GetByID(ctx context.Context, userID string) (*m.User, error)
+	SetIsActive(ctx context.Context, userID string, isActive bool) (*m.User, error)
 }
 
-type UserRepository interface {
-	ExistsByID(userID string) (bool, error)
-	GetByID(userID string) (*m.User, error)
-	SetIsActive(userID string, isActive bool) (*m.User, error)
+type userRepository struct {
+	db     *sqlx.DB
+	getter *trmsqlx.CtxGetter
 }
 
 func NewUserRepository(db *sqlx.DB) UserRepository {
-	return &userRepository{db: db}
+	return &userRepository{
+		db:     db,
+		getter: trmsqlx.DefaultCtxGetter,
+	}
 }
 
-func (r *userRepository) ExistsByID(userID string) (bool, error) {
+func (r *userRepository) ExistsByID(ctx context.Context, userID string) (bool, error) {
 	const method = "UserRepository.ExistsByID"
 
 	query := `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`
 	var exists bool
-	err := r.db.Get(&exists, query, userID)
+
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &exists, query, userID)
 	if err != nil {
 		slog.Error("failed to check user existence",
 			"method", method,
@@ -40,7 +47,7 @@ func (r *userRepository) ExistsByID(userID string) (bool, error) {
 	return exists, nil
 }
 
-func (r *userRepository) GetByID(userID string) (*m.User, error) {
+func (r *userRepository) GetByID(ctx context.Context, userID string) (*m.User, error) {
 	const method = "UserRepository.GetByID"
 
 	query := `
@@ -54,7 +61,8 @@ func (r *userRepository) GetByID(userID string) (*m.User, error) {
 	`
 	var user m.User
 
-	if err := r.db.Get(&user, query, userID); err != nil {
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &user, query, userID)
+	if err != nil {
 		slog.Error("failed to get user by ID",
 			"method", method,
 			"user_id", userID,
@@ -69,7 +77,7 @@ func (r *userRepository) GetByID(userID string) (*m.User, error) {
 	return &user, nil
 }
 
-func (r *userRepository) SetIsActive(userID string, isActive bool) (*m.User, error) {
+func (r *userRepository) SetIsActive(ctx context.Context, userID string, isActive bool) (*m.User, error) {
 	const method = "UserRepository.SetIsActive"
 
 	query := `
@@ -80,7 +88,8 @@ func (r *userRepository) SetIsActive(userID string, isActive bool) (*m.User, err
 	`
 
 	var user m.User
-	if err := r.db.Get(&user, query, isActive, userID); err != nil {
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &user, query, isActive, userID)
+	if err != nil {
 		slog.Error("failed to set user active status",
 			"method", method,
 			"user_id", userID,

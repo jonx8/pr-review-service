@@ -1,32 +1,39 @@
 package repositories
 
 import (
+	"context"
 	"log/slog"
 
+	trmsqlx "github.com/avito-tech/go-transaction-manager/drivers/sqlx/v2"
 	"github.com/jmoiron/sqlx"
 	m "github.com/jonx8/pr-review-service/internal/models"
 )
 
 type TeamRepository interface {
-	ExistsByName(name string) (bool, error)
-	GetTeamByName(name string) (*m.Team, error)
-	CreateTeam(team *m.Team) error
+	ExistsByName(ctx context.Context, name string) (bool, error)
+	GetTeamByName(ctx context.Context, name string) (*m.Team, error)
+	CreateTeam(ctx context.Context, team *m.Team) error
 }
 
 type teamRepository struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	getter *trmsqlx.CtxGetter
 }
 
 func NewTeamRepository(db *sqlx.DB) TeamRepository {
-	return &teamRepository{db: db}
+	return &teamRepository{
+		db:     db,
+		getter: trmsqlx.DefaultCtxGetter,
+	}
 }
 
-func (r *teamRepository) ExistsByName(name string) (bool, error) {
+func (r *teamRepository) ExistsByName(ctx context.Context, name string) (bool, error) {
 	const method = "TeamRepository.ExistsByName"
 
 	query := `SELECT EXISTS(SELECT 1 FROM teams WHERE name = $1)`
 	var exists bool
-	err := r.db.Get(&exists, query, name)
+
+	err := r.getter.DefaultTrOrDB(ctx, r.db).GetContext(ctx, &exists, query, name)
 	if err != nil {
 		slog.Error("failed to check team existence",
 			"method", method,
@@ -39,10 +46,10 @@ func (r *teamRepository) ExistsByName(name string) (bool, error) {
 	return exists, nil
 }
 
-func (r *teamRepository) GetTeamByName(name string) (*m.Team, error) {
+func (r *teamRepository) GetTeamByName(ctx context.Context, name string) (*m.Team, error) {
 	const method = "TeamRepository.GetTeamByName"
 
-	exists, err := r.ExistsByName(name)
+	exists, err := r.ExistsByName(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +61,6 @@ func (r *teamRepository) GetTeamByName(name string) (*m.Team, error) {
 		return nil, nil
 	}
 
-	// Get team members
 	query := `
 		SELECT id, name, is_active 
 		FROM users 
@@ -62,7 +68,9 @@ func (r *teamRepository) GetTeamByName(name string) (*m.Team, error) {
 		ORDER BY name
 	`
 	var members []m.TeamMember
-	if err := r.db.Select(&members, query, name); err != nil {
+
+	err = r.getter.DefaultTrOrDB(ctx, r.db).SelectContext(ctx, &members, query, name)
+	if err != nil {
 		slog.Error("failed to get team members",
 			"method", method,
 			"team_name", name,
@@ -77,21 +85,14 @@ func (r *teamRepository) GetTeamByName(name string) (*m.Team, error) {
 	}, nil
 }
 
-func (r *teamRepository) CreateTeam(team *m.Team) error {
+func (r *teamRepository) CreateTeam(ctx context.Context, team *m.Team) error {
 	const method = "TeamRepository.CreateTeam"
 
-	tx, err := r.db.Beginx()
-	if err != nil {
-		slog.Error("failed to begin transaction",
-			"method", method,
-			"team_name", team.TeamName,
-			"error", err,
-		)
-		return err
-	}
-	defer tx.Rollback()
+	db := r.getter.DefaultTrOrDB(ctx, r.db)
 
-	if _, err = tx.Exec("INSERT INTO teams (name) VALUES ($1)", team.TeamName); err != nil {
+	insertTeamQuery := `INSERT INTO teams (name) VALUES ($1)`
+	_, err := db.ExecContext(ctx, insertTeamQuery, team.TeamName)
+	if err != nil {
 		slog.Error("failed to insert team",
 			"method", method,
 			"team_name", team.TeamName,
@@ -122,7 +123,8 @@ func (r *teamRepository) CreateTeam(team *m.Team) error {
 				is_active = EXCLUDED.is_active
 		`
 
-		if _, err = tx.NamedExec(insertUsersBatchQuery, usersRows); err != nil {
+		_, err = sqlx.NamedExecContext(ctx, db, insertUsersBatchQuery, usersRows)
+		if err != nil {
 			slog.Error("failed to insert team members",
 				"method", method,
 				"team_name", team.TeamName,
@@ -131,15 +133,6 @@ func (r *teamRepository) CreateTeam(team *m.Team) error {
 			)
 			return err
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		slog.Error("failed to commit transaction",
-			"method", method,
-			"team_name", team.TeamName,
-			"error", err,
-		)
-		return err
 	}
 
 	return nil

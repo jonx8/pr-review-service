@@ -25,7 +25,7 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 		return
 	}
 
-	createdTeam, err := h.teamService.CreateTeam(&team)
+	createdTeam, err := h.teamService.CreateTeam(c.Request.Context(), &team)
 	if err != nil {
 		handleError(c, err)
 		return
@@ -41,7 +41,7 @@ func (h *TeamHandler) GetTeam(c *gin.Context) {
 		return
 	}
 
-	team, err := h.teamService.GetTeam(teamName)
+	team, err := h.teamService.GetTeam(c.Request.Context(), teamName)
 	if err != nil {
 		handleError(c, err)
 		return
