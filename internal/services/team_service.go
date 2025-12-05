@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/avito-tech/go-transaction-manager/trm/v2/manager"
@@ -30,21 +29,6 @@ func NewTeamService(teamRepository repo.TeamRepository, trManager *manager.Manag
 
 func (service *teamService) CreateTeam(ctx context.Context, team *m.Team) (*m.Team, error) {
 	const method = "TeamService.CreateTeam"
-
-	// Check for duplicate users in the members list
-	userIDs := make(map[string]bool)
-	for i, member := range team.Members {
-		if userIDs[member.UserID] {
-			slog.Warn("duplicate user_id in team members",
-				"method", method,
-				"team_name", team.TeamName,
-				"user_id", member.UserID,
-				"position", i+1,
-			)
-			return nil, errors.NewValidation(fmt.Sprintf("duplicate user_id '%s' at position %d", member.UserID, i+1))
-		}
-		userIDs[member.UserID] = true
-	}
 
 	err := service.trManager.Do(ctx, func(ctx context.Context) error {
 		exists, err := service.teamRepository.ExistsByName(ctx, team.TeamName)

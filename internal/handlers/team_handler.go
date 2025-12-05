@@ -25,6 +25,15 @@ func (h *TeamHandler) CreateTeam(c *gin.Context) {
 		return
 	}
 
+	// Check for duplicate users in the members list
+	userIDs := make(map[string]bool)
+	for _, member := range team.Members {
+		if userIDs[member.UserID] {
+			validationError(c, "Duplicate users in the members list")
+		}
+		userIDs[member.UserID] = true
+	}
+
 	createdTeam, err := h.teamService.CreateTeam(c.Request.Context(), &team)
 	if err != nil {
 		handleError(c, err)
